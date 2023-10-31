@@ -1,0 +1,1 @@
+The spreadsheet includes population, mass in grams, and the mass specific SMR in milligrams of oxygen consumed per kilogram of fish per hour (mgO2/kg/hr) under the heading T1_avg

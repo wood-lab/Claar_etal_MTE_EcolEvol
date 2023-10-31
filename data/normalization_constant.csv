@@ -1,0 +1,12 @@
+source,fish_or_worm,status,temp,C,i
+Andrea et al preprint,stickle,uninfected,20,2.76,15.79984295
+Walkey and Meakins 1970,stickle,uninfected,15,3.16,23.57059593
+Meakins and Walkey 1975,stickle,uninfected,15,1.3802,3.975696687
+Walkey and Davies 1968,schisto,NA,40,0.9829,2.67219438
+Davies and Walkey 1966,schisto,NA,20,0.3219,1.379746794
+Davies and Walkey 1966,schisto,NA,30,0.5015,1.651196208
+Davies and Walkey 1966,schisto,NA,40,0.8157,2.260757649
+Brown 2004 - fish,stickle,all,,20.83,1112638435
+Brown 2004 - inverts,schisto,all,,19.75,377847034.1
+Gillooly et al. 2001 - fish,stickle,all,,14.47,1924159.871
+Gillooly et al. 2001 - inverts,schisto,all,,27.62,9.89039E+11

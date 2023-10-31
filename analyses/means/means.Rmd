@@ -1,0 +1,469 @@
+---
+title: "meanz"
+author: "Maureen Anne Williams, Danielle Claar, Sara Faiad"
+date: "3/26/2020"
+output: html_document
+---
+Setup the environment, Load and tidy data
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+# Install necessary libraries
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(cowplot)
+library(ggpubr)
+library(viridis)
+#Add violin plot funcionality
+source("https://gist.githubusercontent.com/benmarwick/2a1bb0133ff568cbe28d/raw/fb53bd97121f7f9ce947837ef1a4c65a73bffb3f/geom_flat_violin.R")
+
+# Load necessary data
+Illiamna_Schisto<-read.csv("data/illiamna_data_schisto.csv")
+ill_fish<-read.csv("data/illiamna_data_fish.csv")
+
+#link fish sheet and parasite sheet
+joint_ill<-full_join(Illiamna_Schisto, ill_fish, by = "fish_number") %>% 
+  subset(!is.na(fish_number) & schisto_number!=0 & fish_number!=154)
+joint_ill$number_schisto<-as.factor(joint_ill$number_schisto)
+my_datal <- joint_ill %>% 
+  select(schisto_weight, fish_number, number_schisto)
+
+# Calc summary stats for results
+mean(as.numeric(as.character(my_datal$schisto_weight)))
+sd(as.numeric(as.character(my_datal$schisto_weight)))
+min(joint_ill$fish_weight)
+max(joint_ill$fish_weight)
+min(Illiamna_Schisto$schisto_length,na.rm=TRUE)
+
+infect_1 <- my_datal %>% filter(number_schisto==1)
+infect_2 <- my_datal %>% filter(number_schisto==2)
+infect_3 <- my_datal %>% filter(number_schisto==3)
+infect_4 <- my_datal %>% filter(number_schisto==4)
+infect_8 <- my_datal %>% filter(number_schisto==8)
+
+
+#theme for raincloud plot
+raincloud_theme <- theme(
+  text = element_text(size = 10),
+  axis.title.x = element_text(size = 16),
+  axis.title.y = element_text(size = 16),
+  axis.text = element_text(size = 14),
+  axis.text.x = element_text(angle = 45, vjust = 0.5),
+  legend.title = element_blank(),
+  legend.text = element_text(size = 16),
+  legend.position = c(.6,.4),
+  plot.title = element_text(lineheight = .8, face = "bold", size = 16),
+  panel.border = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.grid.major = element_blank(),
+  axis.line.x = element_line(colour = "black", size = 0.5, linetype = "solid"),
+  axis.line.y = element_line(colour = "black", size = 0.5, linetype = "solid"))
+
+pub_color<- scale_color_viridis(option="viridis",direction=-1,
+                      limits=c(0.0003, 1.55))
+```
+# Create function for flux equation; set default values
+stickle_flux <- function(i=21.2, # mean
+                 Mp=0.22, # mean schisto weight, in grams
+                 alphap=3/4, # theoretical value
+                 E=0.65, # theoretical value
+                 # k=8.62*10^(-5), # Boltzmann's constant (doesn't change)
+                 Temp=288.15,  # in Kelvin, add 273.15 to value in C
+                 Np=1){ # number of parasites
+  Fp = (i*Mp^(alphap)*exp(-E/(8.62*10^(-5)*Temp)))*Np
+  Fp
+}
+
+schisto_flux <- function(i=exp(17.17), # Brown et al 2001 inverts
+                 Mp, # mean schisto weight, in grams
+                 alphap=3/4, # theoretical value
+                 E=0.63, # theoretical value
+                 # k=8.62*10^(-5), # Boltzmann's constant (doesn't change)
+                 Temp=288.15,  # in Kelvin, add 273.15 to value in C
+                 Np=1){ # number of parasites
+  Fp = (i*Mp^(alphap)*exp(-E/(8.62*10^(-5)*Temp)))*Np
+  Fp
+}
+
+```{r}
+# Pull out weights of each
+schisto.weights <- Illiamna_Schisto$schisto_weight
+
+# Calculate instantaneous energy flux for each schisto
+schisto.flux <- schisto_flux(Mp=schisto.weights) %>% as.data.frame()
+# Created a vector of fluxes based on schisto individual weights
+# Create a dataframe combining flux and schisto weights
+schisto.weights<- as.data.frame(schisto.weights)
+schisto.data<- cbind(schisto.weights, schisto.flux) 
+colnames(schisto.data)<- c("schisto.weights", "flux")
+
+#calculate flux per gram of schisto
+schisto.data$fluxper<-schisto.data$flux/schisto.data$schisto.weights
+schisto.data$fluxper_final<-schisto.data$fluxper/(10^(-3))
+
+#hand calculate flux 
+schisto.data$feck<-(exp(17.17)*(schisto.data$schisto.weights^(3/4))*exp(-0.63/(8.62*10^(-5)*288.15)))
+#hand calculate flux per gram of schisto
+schisto.data$feckper<-schisto.data$feck/schisto.data$schisto.weights
+
+#Plot it!
+panel1<-ggplot(schisto.data) +
+  geom_point(mapping = aes(x = schisto.weights, y = fluxper_final))+
+  theme_bw()+
+  guides(fill = FALSE) +
+  guides(color = FALSE) +
+  #scale_color_viridis  (option="viridis",direction=-1, limits=c(0.0003, 1.55)) +
+  xlab("Tapeworm Weight")+
+  ylab("Flux per Gram (mJ/s/g)")+
+  raincloud_theme
+
+
+```
+
+Raincloud Plot
+```{r}
+lb <- function(x) mean(x) - sd(x)
+ub <- function(x) mean(x) + sd(x)
+
+sumld <- my_datal %>% 
+  select(-fish_number) %>%
+  group_by(number_schisto) %>% 
+  summarise_all(funs(mean, median, lower = lb, upper = ub)) 
+numb<-my_datal %>% 
+  group_by(number_schisto) %>% 
+  tally()
+
+panel2 <- 
+  ggplot(data = my_datal, 
+         aes(x = number_schisto, y = schisto_weight)) +
+  geom_flat_violin(position = position_nudge(x = .2, y = 0), 
+                   scale = "width") +
+  geom_point(aes(y = schisto_weight), 
+             position = position_jitter(width = .15), 
+             size = .5, alpha = 0.8) +
+  geom_point(data = sumld, aes(x = number_schisto, y = mean), 
+             position = position_nudge(x = 0.3), size = 2.5) +
+  geom_errorbar(data = sumld, aes(ymin = lower, ymax = upper, y = mean), 
+                position = position_nudge(x = 0.3), width = 0) +
+  guides(fill = FALSE) +
+  guides(color = FALSE) +
+  coord_flip() + 
+  theme_bw() +
+  xlab("Number of Plerocercoids")+
+  ylab("Individual Plerocercoid Weight")+
+  raincloud_theme
+
+```
+
+
+```{r}
+#figure out mean and max total weight of schistos from illiamna dataset (is 0.6778)
+joint_ill%>%
+  group_by(fish_number)%>%
+  mutate(total_schist=sum(schisto_weight)) %>%
+  group_by(number_schisto) %>% 
+  summarize(mean=mean(total_schist), max=max(total_schist))
+
+#figure out minimum individual weight of schistos from illiamna dataset (is 0.0003)
+joint_ill %>% 
+  group_by(number_schisto) %>% 
+  summarize(min=min(schisto_weight))
+
+#Read in fully uneven dataset
+uneven<-read.csv("../../data/uneven_schistos.csv")
+uneven<-as_tibble(uneven)
+#make long format
+uneven_long<- uneven %>% 
+  select(-sum) %>% 
+  pivot_longer(-scenario, values_to = "weights", names_to = "parasite")
+
+
+# Pull out weights of each & scenario (number of schisto in mutliple infection)
+schisto.weights <- uneven_long$weights
+noparas <- uneven_long$scenario
+# Calculate instantaneous energy flux for each schisto
+schisto.flux <- schisto_flux(Mp=schisto.weights) %>% as.data.frame()
+# Created a vector of fluxes based on schisto individual weights
+# Create a dataframe combining flux and schisto weights with number of schisto infecting
+schisto.weights<- as.data.frame(schisto.weights)
+uneven_schisto.data<- cbind(schisto.weights, schisto.flux) 
+colnames(uneven_schisto.data)<- c("schisto.weights", "flux")
+uneven_schisto.data<- cbind(uneven_schisto.data, noparas) 
+
+
+
+#Read in fully even dataset
+even<-read_csv("data/even_schisto.csv")
+even<-as.tibble(even)
+#make long format
+even_long<- even %>% 
+  select(-sum) %>% 
+  pivot_longer(-scenario, values_to = "weights", names_to = "parasite")
+
+
+# Pull out weights of each & scenario (number of schisto in mutliple infection)
+schisto.weights <- even_long$weights
+noparas <- even_long$scenario
+# Calculate instantaneous energy flux for each schisto
+schisto.flux <- schisto_flux(Mp=schisto.weights) %>% as.data.frame()
+# Created a vector of fluxes based on schisto individual weights
+# Create a dataframe combining flux and schisto weights with scenario (number of parasites in infection)
+schisto.weights<- as.data.frame(schisto.weights)
+even_schisto.data<- cbind(schisto.weights, schisto.flux) 
+colnames(even_schisto.data)<- c("schisto.weights", "flux")
+even_schisto.data<- cbind(even_schisto.data, noparas) 
+
+
+even_schisto.data %>%
+  group_by(noparas)%>%
+  mutate(total_flux=sum(flux)) %>% 
+  ggplot() +
+  geom_point(mapping = aes(x = noparas, y = total_flux)) +
+  geom_path(mapping = aes(x = noparas, y = total_flux))
+
+even_schisto.data<-even_schisto.data %>%
+  group_by(noparas)%>%
+  mutate(total_flux=sum(flux)) %>% 
+    mutate(total_flux_milli=total_flux/(10^(-3)))
+
+uneven_schisto.data<-uneven_schisto.data %>%
+  group_by(noparas)%>%
+  mutate(total_flux=sum(flux)) %>% 
+  mutate(total_flux_milli=total_flux/(10^(-3)))
+even_schisto.data$even<-"Even"
+uneven_schisto.data$even<-"Uneven"
+
+mean_summary<-even_schisto.data %>% 
+  #subset(schisto.weights!=0) %>% 
+  group_by(noparas) %>% 
+  summarize(mean=mean(total_flux_milli))
+
+uneven_summary<-uneven_schisto.data %>% 
+  #subset(schisto.weights!=0) %>% 
+  group_by(noparas) %>% 
+  summarize(mean=mean(total_flux_milli))
+
+
+evenness_flux<-rbind(even_schisto.data,uneven_schisto.data)
+
+panel3<-ggplot(evenness_flux, aes(x = noparas, y = total_flux_milli,
+                                  color=even)) + 
+  geom_point(size=3)+
+  geom_path(size=1)+
+        xlab("Number of Tapeworms") + ylab("Total Flux (mJ/S)")+
+    theme_bw()+
+  scale_color_viridis  (option="viridis",direction=-1,
+                      discrete=T) +
+  raincloud_theme
+      
+plot_grid(panel1,panel2,panel3, nrow=1, labels = c("a.", "b.", "c."))
+```
+
+
+```{r}
+
+#figure out mean and max total weight of schistos from illiamna dataset (is 0.6778)
+actual_theoretical<-joint_ill%>%
+  group_by(fish_number)%>%
+  mutate(total_schist=sum(schisto_weight)) %>%
+  select(schisto_weight, fish_number, number_schisto,total_schist) %>% 
+  mutate(number_schisto = as.numeric(number_schisto)) %>% 
+  mutate(av_weight=total_schist/number_schisto)
+ 
+# Pull out weights of each & scenario (number of schisto in mutliple infection)
+actual.schisto.weights <- actual_theoretical$schisto_weight
+theo.schisto.weight <- actual_theoretical$av_weight
+fish_no <- actual_theoretical$fish_number
+schist_no <- actual_theoretical$number_schisto
+# Calculate instantaneous energy flux for each schisto
+actual.schisto.flux <- schisto_flux(Mp=actual.schisto.weights) %>% as.data.frame()
+theo.schisto.flux <- schisto_flux(Mp=theo.schisto.weight) %>% as.data.frame()
+# Created a vector of fluxes based on schisto individual weights
+# Create a dataframe combining flux and schisto weights with number of schisto infecting
+fish_no<- as.data.frame(fish_no)
+schist_no<- as.data.frame(schist_no)
+schisto.data<- cbind(fish_no, schist_no, actual.schisto.flux, theo.schisto.flux) 
+colnames(schisto.data)<- c("fish_no", "schist_no", "actual_flux", "theo_flux")
+
+sum_flux<-schisto.data %>% 
+group_by(fish_no, schist_no) %>% 
+summarise_all(funs(sum))
+
+sum_flux<-sum_flux %>% 
+  mutate(difference = theo_flux-actual_flux) %>% 
+  mutate(percent = (difference/actual_flux)*100) %>% 
+  filter(percent!=0)
+
+mean(sum_flux$percent)
+sd(sum_flux$percent)
+    
+
+actual_flux<-sum_flux$actual_flux
+theo_flux<-sum_flux$theo_flux
+actual_flux<- as.data.frame(actual_flux)
+theo_flux<- as.data.frame(theo_flux)
+schist_no<-sum_flux$schist_no
+actual_flux$ta<-"Actual"
+theo_flux$ta<-"Theoretical"
+actual_flux<- cbind(actual_flux, schist_no) 
+theo_flux<-cbind(theo_flux,schist_no)
+actual_flux$flux<-actual_flux$actual_flux
+actual_flux<-actual_flux %>% 
+  select(-actual_flux)
+theo_flux$flux<-theo_flux$theo_flux
+theo_flux<-theo_flux %>% 
+  select(-theo_flux)
+
+ta_flux<-rbind(actual_flux,theo_flux)
+ta_flux<- ta_flux %>% 
+  mutate(total_flux_milli=flux/(10^(-3)))
+
+mean(sum_flux$percent)
+
+#ASSUME ALL ONE WORM
+sum_ill<-joint_ill%>%
+  subset(!is.na(number_schisto) & number_schisto!=1 & fish_number!=154) %>% 
+  select(fish_number, schisto_weight) %>% 
+  group_by(fish_number)%>%
+  mutate(total_schist=sum(schisto_weight)) %>% 
+  select(-schisto_weight) %>% 
+  ungroup() %>% 
+  group_by(fish_number) %>% 
+  slice(n = 1) %>% 
+  mutate(single_flux=schisto_flux(Mp=total_schist)) %>% 
+  mutate(single="single")
+
+pop_mean_d<-joint_ill%>%
+  subset(!is.na(number_schisto) & number_schisto!=1 & fish_number!=154) %>% 
+  select(fish_number, number_schisto) %>% 
+  group_by(fish_number)%>%
+    slice(n = 1) %>% 
+  mutate(number_schisto = as.numeric(number_schisto)) %>% 
+  mutate(schist_mass= 0.117* number_schisto) %>% 
+  mutate(pop_mean_flux=schisto_flux(Mp=schist_mass)) %>% 
+  mutate(pop_mean="pop mean")
+
+sum_ill<-full_join(pop_mean_d, sum_ill, by=c("fish_number" = "fish_number")) 
+
+single<-full_join(sum_flux, sum_ill, by=c("fish_no" = "fish_number")) 
+single$actual_flux<-single$actual_flux/(10^(-3))
+single$sing_flux<-single$single_flux/(10^(-3))
+single$mean_flux<-single$theo_flux/(10^(-3))
+single$pop_mean_flux<-single$pop_mean_flux/(10^(-3))
+
+single<-single %>% 
+  select(fish_no, schist_no, actual_flux, mean_flux, sing_flux, pop_mean_flux) %>% 
+  pivot_longer(cols=c("mean_flux", "sing_flux", "pop_mean_flux"), names_to="method", values_to="flux")
+
+max(single$singpercent)
+
+ggplot(sum_flux, cond1 = "theo_flux", cond2 = "actual_flux",  line.color = "gray", line.size = 0.4,
+ palette = "npg")
+
+single2 <- single %>% 
+  filter(method!="pop_mean_flux")
+
+panel4<-ggplot(single2, aes(x = actual_flux, y = flux)) +
+    geom_point(aes(color = factor(method))) +
+  geom_abline(intercept = 0, slope = 1, color="gray", size=1)+
+  xlab("Actual Weight Flux (mJ/s)") + ylab("Estimated Weight Flux (mJ/s)")+
+    theme_bw() +
+  scale_color_manual(values=c("#23888E", "#31688E"), name="Calculation Method", labels = c("Even", "Sum"))+
+  theme(legend.position=c(0.3,0.7),
+  text = element_text(size = 14),
+  axis.title.x = element_text(size = 16),
+  axis.title.y = element_text(size = 16),
+  axis.text = element_text(size = 14),
+  legend.text = element_text(size = 14),
+  legend.title = element_text(size = 14),
+  plot.title = element_text(lineheight = .8, face = "bold", size = 16),
+  panel.border = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.grid.major = element_blank(),
+  axis.line.x = element_line(colour = "black", size = 0.5, linetype = "solid"),
+  axis.line.y = element_line(colour = "black", size = 0.5, linetype = "solid"))
+
+
+```
+
+```{r}
+
+uneven_nozero<-uneven_schisto.data %>%
+  subset(schisto.weights!=0)
+
+uneven_summary<-uneven_nozero %>% 
+  group_by(noparas) %>% 
+  summarize(median = median(schisto.weights, na.rm = TRUE)) %>% 
+  mutate(flux = schisto_flux(Mp=median)) %>% 
+  mutate(totmed=flux*noparas) %>% 
+  mutate(totmed_milli=totmed/(10^(-3)))
+
+uneven_summary$flux <- schisto_flux(Mp=uneven_summary$median)
+
+uneven_summary_2<-uneven_schisto.data %>% 
+  #subset(schisto.weights!=0) %>% 
+  group_by(noparas) %>% 
+  summarize(mean=mean(total_flux_milli))
+
+parano <- uneven_summary$noparas
+median <- uneven_summary$totmed_milli
+realsies <- uneven_summary_2$mean
+true
+mean<- mean_summary$mean
+popmean
+
+
+noparas<- as.data.frame(parano) %>% 
+  mutate(mass_popmean = parano*0.117) %>% 
+  mutate(popmean_flux = schisto_flux(Mp=mass_popmean)) %>% 
+  mutate(popmean_milli=popmean_flux/(10^(-3))) %>% 
+  select(-c(mass_popmean,popmean_flux))
+summary.data<- cbind(noparas, median, mean, realsies) 
+colnames(summary.data)<- c("parasite_number", "Pop. Mean", "Median", "Even", "Max. Disparity")
+summary.data<- summary.data %>% 
+  pivot_longer(-parasite_number, names_to = "Measurement", values_to = "Flux")
+
+summary.data %>% 
+  group_by(Measurement) %>% 
+    summarise_all(funs(mean, median, sd)) 
+
+summary.data2<-summary.data %>% filter(Measurement!="Pop. Mean")
+
+panel3<-ggplot(summary.data2, aes(x = parasite_number, y = Flux), color=Measurement) + 
+  geom_point(size=3, aes(color=Measurement))+
+  geom_line(aes(linetype = Measurement, color=Measurement)) +
+  #geom_path(size=1)+
+  xlab("Number of Tapeworms") + ylab("Total Flux (mJ/S)")+
+   scale_color_manual(values=c("#23888E", "#FDE725",  "#440154"), name="", labels = c("Even", "Max. Disparity", "Median")) + 
+  theme_bw() +
+  guides(linetype = FALSE)  +
+  theme(legend.position=c(0.7,0.3),
+  text = element_text(size = 10),
+  axis.title.x = element_text(size = 16),
+  axis.title.y = element_text(size = 16),
+  axis.text = element_text(size = 14),
+  axis.text.x = element_text(angle = 45, vjust = 0.5),
+  legend.title = element_blank(),
+  legend.text = element_text(size = 16),
+  plot.title = element_text(lineheight = .8, face = "bold", size = 16),
+  panel.border = element_blank(),
+  panel.grid.minor = element_blank(),
+  panel.grid.major = element_blank(),
+  axis.line.x = element_line(colour = "black", size = 0.5, linetype = "solid"),
+  axis.line.y = element_line(colour = "black", size = 0.5, linetype = "solid"))
+
+plot_grid(panel1,panel2,panel3, panel4, nrow=2, labels = c("A", "B", "C", "D"))
+
+pdf(file = "analyses/means/means_Figure2.pdf", width = 8, height=8,
+    useDingbats = FALSE)
+plot_grid(panel1,panel2,panel3, panel4, nrow=2, labels = c("A", "B", "C", "D"))
+dev.off()
+
+```
+
+```{r}
+
+
+
+
+```
